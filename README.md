@@ -9,3 +9,5 @@ To get the sentiment polarity scores of each review that was extracted, the VADE
 The program exports an Excel list that includes sentiment polarity scores for each review. The number of pages of reviews exported is determined by the value of x, which you can adjust in the main execution of the program.
 
 Additionally, the codes prepares the data for VADER by removing non-English reviews, as well as outliers. On top of that, only medium-length reviews are used. Medium-length reviews are determined by the quartile values of the original data set.
+
+Disclaimer: The extracted product reviews were used for research purposes, not for commercial usage.
