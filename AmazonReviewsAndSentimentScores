@@ -1,0 +1,248 @@
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from langdetect import detect
+from langdetect import DetectorFactory
+from nltk.sentiment.vader import SentimentIntensityAnalyzer
+import time
+
+class AmazonReviews():
+    def __init__(self,title,stars,comments):
+        self.title = title
+        self.stars = stars
+        self.comments = comments
+    
+    # instantiate Chrome Driver as Class variable to be used in Class methods 
+    # instantiating Chrome Driver and wait can only happen once, hence it is not a method
+    driver = webdriver.Chrome(service = Service(ChromeDriverManager().install()))
+    wait = WebDriverWait(driver,10)
+
+    #use driver to call website
+    def getWebsite(web):
+        AmazonReviews.driver.get(web)
+        
+    def getCurrentWebPageURL():
+        currentPage = AmazonReviews.driver.current_url
+        return currentPage
+        
+    def getAndEditCurrentPageURL(pagenumber):
+        currentPage = AmazonReviews.getCurrentWebPageURL()
+        currentPage = currentPage.replace(currentPage[currentPage.find("pageNumber"):],('pageNumber={0}'.format(pagenumber)))
+        return currentPage
+
+    #use driver to find element from current page
+    def findElementFromWebPage(method,xpath):
+        foundElement = AmazonReviews.driver.find_element(method,xpath)
+        return foundElement
+    
+    def findElementFromWebElement(element, method, xpath):
+        foundElement = element.find_element(method,xpath)
+        return foundElement
+    
+    def waitAndGetClickableElement(xpath):
+        foundElement = AmazonReviews.wait.until(EC.element_to_be_clickable((By.XPATH,xpath)))
+        return foundElement
+    
+    def makeDriverWaitAndFindAllElements(xpath):
+        reviews = AmazonReviews.wait.until(EC.presence_of_all_elements_located((By.XPATH,xpath)))
+        return reviews
+    
+    #click element that is a button
+    def clickButtonElement(foundElement):
+        foundElement.click()
+        
+    def goToSeeAllReviewsPage():
+        seeAllResults_button = AmazonReviews.findElementFromWebPage('xpath','//*[@id="cr-pagination-footer-0"]/a')
+        AmazonReviews.clickButtonElement(seeAllResults_button)
+    
+    def appendReviewToList(self):
+        review_title.append(self.title)
+        review_stars.append(self.stars)
+        review_comments.append(self.comments)
+        amazonReviews = pd.DataFrame({'Title': review_title,
+                                      'Rating': review_stars,
+                                      'Comments': review_comments})
+        return amazonReviews
+    
+    def loopThroughPageAndCollectReviews(element):
+        for r in element:
+            title = AmazonReviews.findElementFromWebElement(r,'xpath','.//a[@data-hook="review-title"] | .//span[@data-hook="review-title"]')
+            stars = AmazonReviews.findElementFromWebElement(r,'xpath','.//i[@data-hook="review-star-rating"]/span | .//i[@data-hook="cmps-review-star-rating"]/span')
+            comments = AmazonReviews.findElementFromWebElement(r,'xpath','.//span[@data-hook="review-body"]')
+            single_Review = AmazonReviews(title.text,stars.get_attribute("innerHTML"),comments.text)
+            amazonReviews = AmazonReviews.appendReviewToList(single_Review)
+        return amazonReviews
+    
+    def collectAllReviewsFromNumberOfPages(numberOfPages):
+        i = 1
+        while i <= numberOfPages:
+            nextPage_button = AmazonReviews.waitAndGetClickableElement('.//li[@class="a-last"]')
+            AmazonReviews.clickButtonElement(nextPage_button)
+            currentPage = AmazonReviews.getAndEditCurrentPageURL(i)
+            AmazonReviews.getWebsite(currentPage)
+            reviews = AmazonReviews.makeDriverWaitAndFindAllElements('.//div[contains(@class,"a-section review aok-relative")]')   
+            amazonReviews = AmazonReviews.loopThroughPageAndCollectReviews(reviews)
+            i+=1
+        return amazonReviews
+    
+    def createBoxPlot(frame,frame_cleaned):
+        return plt.boxplot([frame,frame_cleaned])
+    
+    def getUpperQuartile(frame):
+        upper_quartile = np.percentile(frame, 75)
+        return upper_quartile
+    
+    def getLowerQuartile(frame):
+        lower_quartile = np.percentile(frame, 25)
+        return lower_quartile
+    
+    def getInterQuartile(frame):
+        iqr = AmazonReviews.getUpperQuartile(frame) - AmazonReviews.getLowerQuartile(frame)
+        return iqr
+    
+    def getMinimumWordCount(frame):
+        minimum = np.min(frame)
+        return minimum
+    
+    def getMaximumWordCount(frame):
+        maximum = np.max(frame)
+        return maximum
+        
+    def getLowerOutlierLimit(frame):
+        lower_bound = AmazonReviews.getLowerQuartile(frame) - 1.5*AmazonReviews.getInterQuartile(frame)
+        return lower_bound
+    
+    def getUpperOutlierLimit(frame):
+        upper_bound = AmazonReviews.getUpperQuartile(frame) + 1.5*AmazonReviews.getInterQuartile(frame)
+        return upper_bound
+    
+    def obtainOutliers(frame,colname):
+        lower_bound = AmazonReviews.getLowerOutlierLimit(frame[colname])
+        upper_bound = AmazonReviews.getUpperOutlierLimit(frame[colname])
+        outliers = []
+        for i in frame[colname]:
+            if((i<lower_bound)|(i>upper_bound)):
+                outliers.append(frame[frame[colname]==i])
+        outliers = pd.concat(outliers).drop_duplicates()        
+        return outliers
+    
+    def removeNextLine(frame):
+        frame["Title"] = frame["Title"].replace('\\n','', regex=True)
+        frame["Comments"] = frame["Comments"].replace('\\n','', regex=True)
+        return frame
+    
+    def changeType(frame):
+        frame = frame.astype(float)
+        return frame
+    
+    def countNumberOfWords(frame):
+        wordCount = []
+        for i in frame:
+            wordCount.append(str(len(i.split())))
+        return wordCount
+    
+    def getWordCountFromComments(df_frame,colname,comments_to_count):
+        df_frame[colname] = AmazonReviews.countNumberOfWords(comments_to_count)
+        df_frame[colname] = AmazonReviews.changeType(df_frame[colname])
+        return df_frame[colname]
+    
+    def resetFrameIndex(frame):
+        new_frame = frame.reset_index(drop=True)
+        return new_frame
+    
+    def dropOutliers(df_frame):
+        df_frame_cleaned = df_frame.drop(AmazonReviews.obtainOutliers(df_AmazonReviews,"Word Count").index)
+        return df_frame_cleaned
+    
+    def consolidateStatsValues(frame):
+        data = []
+        data = {
+            "Maximum" : AmazonReviews.getMaximumWordCount(frame),
+            "Minimum" : AmazonReviews.getMinimumWordCount(frame),
+            "Upper Quartile" : AmazonReviews.getUpperQuartile(frame),
+            "Lower Quartile" : AmazonReviews.getLowerQuartile(frame),
+            "Interquartile" : AmazonReviews.getInterQuartile(frame)}
+        return data
+    
+    def printStatsValues(frame):
+        wordCountResults = AmazonReviews.consolidateStatsValues(frame)
+        print("Short Length range: " + str(wordCountResults.get("Minimum")) + " - " + str(wordCountResults.get("Lower Quartile")))
+        print("Medium Length range: " + str(wordCountResults.get("Lower Quartile")) + " - " + str(wordCountResults.get("Upper Quartile")))
+        print("Long Length range: " + str(wordCountResults.get("Upper Quartile")) + " - " + str(wordCountResults.get("Maximum")))
+        print("\n")
+    
+    def detectNonEnglishLanguage(frame,colname):
+        DetectorFactory.seed = 0
+        otherLanguages = []
+        for i in frame[colname]:
+            if(detect(i)!="en"):
+                if(len(i.split())>3.0):
+                    otherLanguages.append(frame[frame[colname]==i])
+                else:
+                    continue
+        otherLanguages = pd.concat(otherLanguages).drop_duplicates()
+        return otherLanguages
+    
+    def dropOtherLanguages(frame,colname):
+        frame = frame.drop(AmazonReviews.detectNonEnglishLanguage(frame,colname).index)
+        frame = frame.reset_index(drop=True)
+        return frame
+    
+    def keepMediumLengthReviews(frame,colname):
+        frame_medium = frame[(frame[colname] >= AmazonReviews.getLowerQuartile(frame[colname])) & (frame[colname] <= AmazonReviews.getUpperQuartile(frame[colname]))]
+        return frame_medium
+    
+    def cleanAndPrepareDatasetFromAmazon(df_AmazonReviews):
+        df_AmazonReviews = AmazonReviews.removeNextLine(df_AmazonReviews)
+        df_AmazonReviews["Word Count"] = AmazonReviews.getWordCountFromComments(df_AmazonReviews,"Word Count",df_AmazonReviews['Comments'])
+        df_AmazonReviews_cleaned = AmazonReviews.dropOutliers(df_AmazonReviews)
+        #print the consolidated range of length for short reviews, medium length reviews and long length reviews
+        AmazonReviews.printStatsValues(df_AmazonReviews_cleaned["Word Count"])
+        #drop languages except English
+        df_AmazonReviews_cleaned = AmazonReviews.dropOtherLanguages(df_AmazonReviews_cleaned,"Comments")
+        #plot a box plot to visually see the distribution of before and after data
+        AmazonReviews.createBoxPlot(df_AmazonReviews["Word Count"],df_AmazonReviews_cleaned["Word Count"])
+        df_AmazonReviews_cleaned_medium = AmazonReviews.keepMediumLengthReviews(df_AmazonReviews_cleaned,'Word Count')
+        df_AmazonReviews_cleaned_medium = AmazonReviews.resetFrameIndex(df_AmazonReviews_cleaned_medium)
+        return df_AmazonReviews_cleaned_medium
+    
+    def obtainSentimentsForEachComment(frame,colname):
+        sia = SentimentIntensityAnalyzer()
+        frame["Score"] = pd.Series()
+        for i in frame.index:
+            frame[colname][i] = sia.polarity_scores(frame["Comments"][i])["compound"]
+        
+    def exportAllReviewsToCSV(frame,string):
+        frame.to_csv('AmazonReviews{s}.csv'.format(s=string))
+
+    
+if __name__ == '__main__':
+    program_start_time = time.time()
+    web = 'https://www.amazon.sg/Little-Tikes-628566000-Anchors-Pirate/dp/B00B0DWB62/ref=cm_cr_arp_d_product_top?ie=UTF8'
+    AmazonReviews.getWebsite(web)
+    AmazonReviews.goToSeeAllReviewsPage()
+    review_title = []
+    review_stars = []
+    review_comments = []
+    df_AmazonReviews = AmazonReviews.collectAllReviewsFromNumberOfPages(120)
+    AmazonReviews.driver.quit()
+    
+    df_AmazonReviews_cleaned_medium = AmazonReviews.cleanAndPrepareDatasetFromAmazon(df_AmazonReviews)
+    AmazonReviews.obtainSentimentsForEachComment(df_AmazonReviews_cleaned_medium,"Score")
+
+    AmazonReviews.exportAllReviewsToCSV(df_AmazonReviews,"Original")
+    AmazonReviews.exportAllReviewsToCSV(df_AmazonReviews_cleaned_medium,"WithSentimentScores")
+
+    program_end_time = time.time()
+    program_duration = program_end_time - program_start_time
+    print(program_duration)
+    
+    
+    
+    
